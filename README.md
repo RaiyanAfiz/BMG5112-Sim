@@ -3,5 +3,7 @@ Hill Type Muscle Simulation
 
 ## Compatibility Check
 ✓ Linux
+
 ○ Windoes
+
 ○ Mac
