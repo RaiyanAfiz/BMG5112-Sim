@@ -8,20 +8,22 @@ import numpy as np
 # Have Radio buttons for different conditions
 # Make it prettier 
 
-os.environ["QT_QPA_PLATFORM"] = "xcb"
+if sys.platform.startswith("linux"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QSlider, QDoubleSpinBox, 
                              QCheckBox, QGroupBox, QFormLayout, QGridLayout)
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QPalette
 from model import ClassicalHillModel
-from visualizer import MuscleVisualizer
+from visualizer import MuscleVisualizer, ArmVisualizer
 
 class MuscleApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Hill-Type Muscle Contraction Simulator")
-        self.resize(1200, 650)
+        self.resize(1150, 780)
         
         self.model = ClassicalHillModel()
         
@@ -101,10 +103,14 @@ class MuscleApp(QMainWindow):
         
         group_readouts.setLayout(layout_readouts)
         control_panel.addWidget(group_readouts)
-        control_panel.addStretch()
-        
-        # 3. Right Panel (Matplotlib Canvas)
-        self.canvas = MuscleVisualizer(self, width=8, height=5)
+
+        # 3. Whole-muscle graphic, under the controls and readouts
+        self.arm_canvas = ArmVisualizer(self, width=4.2, height=3.6)
+        self.arm_canvas.setMinimumHeight(300)
+        control_panel.addWidget(self.arm_canvas, 1)
+
+        # 4. Right Panel: F-v graph with the sarcomere schematic underneath
+        self.canvas = MuscleVisualizer(self, width=7, height=7)
         
         self.layout.addLayout(control_panel, 1)
         self.layout.addWidget(self.canvas, 2)
@@ -133,9 +139,42 @@ class MuscleApp(QMainWindow):
         
         # Trigger canvas redraw
         self.canvas.update_plot(self.model, params, v_op, self.check_power.isChecked())
+        contraction_ratio = v_op / v_max if v_max > 0 else 0
+        self.arm_canvas.update_plot(contraction_ratio, F_op, params['F0'], v_op)
+
+def apply_light_theme(app):
+    """Force a light theme regardless of the OS dark-mode setting."""
+    # Qt 6.8+: tell Qt (and the Windows title bar) to use the light scheme
+    hints = app.styleHints()
+    if hasattr(hints, "setColorScheme"):
+        hints.setColorScheme(Qt.ColorScheme.Light)
+
+    # Fusion style respects our palette on every OS
+    app.setStyle("Fusion")
+
+    white = QColor(255, 255, 255)
+    black = QColor(0, 0, 0)
+    light_gray = QColor(240, 240, 240)
+
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, white)
+    palette.setColor(QPalette.ColorRole.WindowText, black)
+    palette.setColor(QPalette.ColorRole.Base, white)
+    palette.setColor(QPalette.ColorRole.AlternateBase, light_gray)
+    palette.setColor(QPalette.ColorRole.Text, black)
+    palette.setColor(QPalette.ColorRole.Button, light_gray)
+    palette.setColor(QPalette.ColorRole.ButtonText, black)
+    palette.setColor(QPalette.ColorRole.ToolTipBase, white)
+    palette.setColor(QPalette.ColorRole.ToolTipText, black)
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(120, 120, 120))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(0, 120, 215))
+    palette.setColor(QPalette.ColorRole.HighlightedText, white)
+    app.setPalette(palette)
+
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    apply_light_theme(app)
     window = MuscleApp()
     window.show()
     sys.exit(app.exec())
