@@ -4,6 +4,9 @@ Hill Type Muscle Simulation
 ## Compatibility Check
 ✓ Linux
 
-○ Windoes
+✓ Windows
 
 ○ Mac
+
+## Building a Mac app
+See [BUILD_MAC.md](BUILD_MAC.md) for step-by-step instructions.
