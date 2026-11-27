@@ -7,7 +7,11 @@ on:
     tags: ["v*"]              # pushing a tag like v1.0 also publishes a Release
 
 permissions:
-  contents: write             # needed to attach the zips to a Release
+  contents: write             # needed to attach the disk images to a Release
+
+concurrency:                  # a newer push cancels an older, still-running build
+  group: build-mac-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -17,9 +21,16 @@ jobs:
         include:
           - runner: macos-latest       # Apple Silicon (M1 and newer)
             arch: apple-silicon
+            cpu: arm64
+            chip: "Apple Silicon (M1 or newer)"
           - runner: macos-15-intel     # Intel Macs
             arch: intel
+            cpu: x86_64
+            chip: "Intel"
     runs-on: ${{ matrix.runner }}
+    env:
+      APP: dist/HillMuscleSim.app
+      DMG: HillMuscleSim-mac-${{ matrix.arch }}.dmg
 
     steps:
       - uses: actions/checkout@v5
@@ -32,14 +43,81 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt pyinstaller==6.22.3
 
       - name: Build HillMuscleSim.app
-        run: pyinstaller --noconfirm --windowed --name HillMuscleSim app.py
-
-      - name: Smoke test (app starts and stays up for 15 s)
         run: |
-          QT_QPA_PLATFORM=offscreen ./dist/HillMuscleSim.app/Contents/MacOS/HillMuscleSim &
+          pyinstaller --noconfirm --clean --windowed \
+            --name HillMuscleSim \
+            --osx-bundle-identifier ca.bmg5112.hillmusclesim \
+            app.py
+
+      - name: Check the executable and its CPU type
+        run: |
+          exe="$APP/Contents/MacOS/HillMuscleSim"
+          test -x "$exe" || { echo "::error::$exe is missing or not executable"; exit 1; }
+          archs=$(lipo -archs "$exe")
+          echo "Main executable architectures: $archs"
+          case " $archs " in
+            *" ${{ matrix.cpu }} "*) ;;
+            *) echo "::error::Expected ${{ matrix.cpu }}, got: $archs"; exit 1 ;;
+          esac
+
+      - name: Find the oldest macOS the bundled libraries support
+        id: minos
+        # The bundle is only as compatible as its newest-targeted library (numpy and
+        # Qt wheels are often built for recent macOS). Writing that version into
+        # Info.plist makes an older Mac show a clear "requires macOS X" message
+        # instead of the app crashing silently on launch.
+        run: |
+          python - <<'EOF'
+          import os, re, subprocess
+
+          app = os.environ["APP"]
+          magics = {bytes.fromhex(m) for m in ("cffaedfe", "cefaedfe", "feedfacf", "feedface", "cafebabe", "bebafeca")}
+          best, best_file = (0,), None
+          for root, _, files in os.walk(app):
+              for name in files:
+                  path = os.path.join(root, name)
+                  if os.path.islink(path):
+                      continue
+                  with open(path, "rb") as f:
+                      if f.read(4) not in magics:
+                          continue
+                  out = subprocess.run(["otool", "-l", path], capture_output=True, text=True).stdout
+                  want = False
+                  for line in out.splitlines():
+                      line = line.strip()
+                      if line in ("cmd LC_BUILD_VERSION", "cmd LC_VERSION_MIN_MACOSX"):
+                          want = True
+                      elif want and re.match(r"(minos|version) [\d.]+$", line):
+                          ver = tuple(int(x) for x in line.split()[1].split("."))
+                          if ver > best:
+                              best, best_file = ver, os.path.relpath(path, app)
+                          want = False
+
+          minos = ".".join(map(str, best)) if best_file else "11.0"
+          print(f"Minimum macOS: {minos} (set by {best_file})")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"version={minos}\n")
+          EOF
+
+      - name: Set minimum macOS in Info.plist
+        run: |
+          plutil -replace LSMinimumSystemVersion -string "${{ steps.minos.outputs.version }}" "$APP/Contents/Info.plist"
+          plutil -p "$APP/Contents/Info.plist"
+
+      - name: Re-sign (ad-hoc) and verify the signature
+        # Apple Silicon refuses to run code without a valid signature, and editing
+        # Info.plist above invalidated PyInstaller's. Re-sign the whole bundle and
+        # fail the build if the signature doesn't verify.
+        run: |
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: Smoke test 1 (executable starts and stays up for 15 s)
+        run: |
+          QT_QPA_PLATFORM=offscreen "$APP/Contents/MacOS/HillMuscleSim" &
           pid=$!
           sleep 15
           if kill -0 "$pid" 2>/dev/null; then
@@ -47,22 +125,78 @@ jobs:
             echo "App started OK"
           else
             wait "$pid"; code=$?
-            echo "App exited early with code $code"
+            echo "::error::App exited early with code $code"
             exit 1
           fi
 
-      - name: Zip the app
-        # ditto keeps the symlinks and permissions the .app bundle needs
-        run: ditto -c -k --keepParent dist/HillMuscleSim.app HillMuscleSim-mac-${{ matrix.arch }}.zip
+      - name: Smoke test 2 (opens like a double-click, through LaunchServices)
+        run: |
+          open -n "$APP"
+          sleep 15
+          if pgrep -f "HillMuscleSim.app/Contents/MacOS/HillMuscleSim" >/dev/null; then
+            pkill -f "HillMuscleSim.app/Contents/MacOS/HillMuscleSim"
+            echo "App opened OK via LaunchServices"
+          else
+            echo "::error::App did not stay open when launched with 'open'"
+            exit 1
+          fi
+
+      - name: Package as a disk image
+        # A .dmg is a single file, so nothing inside it (permissions, symlinks,
+        # signature) can be damaged by GitHub's artifact zip or by unzipping tools.
+        run: |
+          stage=$(mktemp -d)
+          ditto "$APP" "$stage/HillMuscleSim.app"
+          ln -s /Applications "$stage/Applications"
+          cat > "$stage/READ ME FIRST.txt" <<EOF
+          HillMuscleSim for ${{ matrix.chip }} Macs, macOS ${{ steps.minos.outputs.version }} or newer.
+          (Check yours: Apple menu > About This Mac.)
+
+          1. Drag HillMuscleSim onto the Applications folder.
+
+          2. Double-click HillMuscleSim in Applications. The first time, macOS
+             blocks it because it isn't from an identified developer:
+               - Click Done (or Cancel).
+               - Open System Settings > Privacy & Security, scroll down and
+                 click "Open Anyway" next to the HillMuscleSim message.
+               - Confirm with your password or Touch ID.
+             On macOS 14 or older you can instead right-click the app,
+             choose Open, then click Open again.
+
+          3. If macOS says the app "is damaged" or still "can't be opened",
+             open Terminal and run:
+
+               xattr -dr com.apple.quarantine /Applications/HillMuscleSim.app
+
+             then double-click it again.
+          EOF
+          # hdiutil is occasionally "Resource busy" on CI runners; retry a few times
+          for attempt in 1 2 3; do
+            hdiutil create -volname HillMuscleSim -srcfolder "$stage" -ov -format UDZO "$DMG" && break
+            echo "hdiutil failed (attempt $attempt), retrying..."; sleep 5
+          done
+          test -f "$DMG"
+          hdiutil verify "$DMG"
+
+      - name: Summary
+        run: |
+          size=$(du -h "$DMG" | cut -f1)
+          {
+            echo "### $DMG"
+            echo "| Chip | CPU | Minimum macOS | Size |"
+            echo "|---|---|---|---|"
+            echo "| ${{ matrix.chip }} | ${{ matrix.cpu }} | ${{ steps.minos.outputs.version }} | $size |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: HillMuscleSim-mac-${{ matrix.arch }}
-          path: HillMuscleSim-mac-${{ matrix.arch }}.zip
+          path: ${{ env.DMG }}
+          compression-level: 0        # the .dmg is already compressed
 
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: HillMuscleSim-mac-${{ matrix.arch }}.zip
+          files: ${{ env.DMG }}
