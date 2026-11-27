@@ -18,7 +18,7 @@ class MuscleVisualizer(FigureCanvasQTAgg):
         self.ax_power.clear()
         self.ax_sarc.clear()
 
-        F0, a, b = params['F0'], params['a'], params['b']
+        F0 = params['F0']
         v_max = model.get_vmax(params)
         
         # Generate F-v domain array

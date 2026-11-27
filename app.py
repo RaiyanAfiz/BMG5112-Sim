@@ -2,13 +2,11 @@ import sys
 import os
 import numpy as np
 
-# TODO: 
-# Add Sliders: V_max, k, f0
-# a & b are derived 
+# TODO:
 # Have Radio buttons for different conditions
-# Make it prettier 
+# Make it prettier
 
-os.environ["QT_QPA_PLATFORM"] = "xcb"
+os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QSlider, QDoubleSpinBox, 
@@ -38,42 +36,54 @@ class MuscleApp(QMainWindow):
         group_params = QGroupBox("Hill Parameters & Controls")
         form_params = QFormLayout()
         
-        # Helper to create linked Slider + SpinBox
-        def create_control(min_v, max_v, default):
+        # Helper to create linked Slider + SpinBox (supports fractional steps)
+        def create_control(min_v, max_v, default, step=1.0, decimals=1):
             spin = QDoubleSpinBox()
             spin.setRange(min_v, max_v)
+            spin.setDecimals(decimals)
+            spin.setSingleStep(step)
             spin.setValue(default)
-            spin.setDecimals(1)
-            
+
             slider = QSlider(Qt.Orientation.Horizontal)
-            slider.setRange(int(min_v), int(max_v))
-            slider.setValue(int(default))
-            
-            # Sync bindings without infinite loops
-            slider.valueChanged.connect(lambda v: spin.setValue(float(v)))
-            spin.valueChanged.connect(lambda v: slider.setValue(int(v)) if slider.value() != int(v) else None)
-            spin.valueChanged.connect(self.update_simulation)
-            
+            slider.setRange(int(round(min_v / step)), int(round(max_v / step)))
+            slider.setValue(int(round(default / step)))
+
+            def on_slider_changed(tick):
+                val = round(tick * step, decimals)
+                if not np.isclose(spin.value(), val):
+                    spin.setValue(val)
+
+            def on_spin_changed(val):
+                tick = int(round(val / step))
+                if slider.value() != tick:
+                    slider.blockSignals(True)
+                    slider.setValue(tick)
+                    slider.blockSignals(False)
+                self.update_simulation()
+
+            slider.valueChanged.connect(on_slider_changed)
+            spin.valueChanged.connect(on_spin_changed)
+
             hl = QHBoxLayout()
             hl.addWidget(slider)
             hl.addWidget(spin)
             return spin, slider, hl
 
-        self.spin_F0, _, hl_F0 = create_control(10, 500, 100)
-        self.spin_a, _, hl_a = create_control(1, 100, 25)
-        self.spin_b, _, hl_b = create_control(1, 150, 40)
-        
+        self.spin_F0, self.slider_F0, hl_F0 = create_control(10.0, 500.0, 100.0, step=1.0, decimals=1)
+        self.spin_Vmax, self.slider_Vmax, hl_Vmax = create_control(10.0, 500.0, 160.0, step=1.0, decimals=1)
+        self.spin_k, self.slider_k, hl_k = create_control(0.05, 1.00, 0.25, step=0.01, decimals=2)
+
         # Velocity operating point is bound to a percentage (0-100%) to safely scale when Vmax changes
-        self.spin_v, _, hl_v = create_control(0, 100, 20)
+        self.spin_v, self.slider_v, hl_v = create_control(0.0, 100.0, 20.0, step=1.0, decimals=1)
         self.spin_v.setSuffix(" % of Vmax")
-        
+
         self.check_power = QCheckBox("Overlay Mechanical Power")
         self.check_power.setChecked(True)
         self.check_power.stateChanged.connect(self.update_simulation)
-        
+
         form_params.addRow("Isometric Force (F0) [N]:", hl_F0)
-        form_params.addRow("Force Asymptote (a) [N]:", hl_a)
-        form_params.addRow("Velocity Asymptote (b) [mm/s]:", hl_b)
+        form_params.addRow("Max Shortening Velocity (Vmax) [mm/s]:", hl_Vmax)
+        form_params.addRow("Curvature Constant (k = a/F0):", hl_k)
         form_params.addRow("Operating Velocity (v):", hl_v)
         form_params.addRow("", self.check_power)
         
@@ -113,24 +123,23 @@ class MuscleApp(QMainWindow):
         """Gathers parameters, evaluates model, updates readouts and plots."""
         params = {
             'F0': self.spin_F0.value(),
-            'a': self.spin_a.value(),
-            'b': self.spin_b.value()
+            'Vmax': self.spin_Vmax.value(),
+            'k': self.spin_k.value()
         }
-        
+
         v_max = self.model.get_vmax(params)
         v_op = (self.spin_v.value() / 100.0) * v_max
-        
+
         F_op = self.model.evaluate_force(np.array([v_op]), params)[0]
         P_op = F_op * v_op
-        ratio = params['a'] / params['F0'] if params['F0'] > 0 else 0
-        
-        # Update text readouts
+
+        # Update text readouts (a and b remain derived internally)
         self.lbl_vmax.setText(f"V_max: {v_max:.1f} mm/s")
-        self.lbl_ratio.setText(f"Curvature (a/F0): {ratio:.3f}")
+        self.lbl_ratio.setText(f"Curvature (k): {params['k']:.2f}")
         self.lbl_F.setText(f"Force (F): {F_op:.1f} N")
         self.lbl_v.setText(f"Velocity (v): {v_op:.1f} mm/s")
         self.lbl_P.setText(f"Power (P): {P_op:.1f} mW")
-        
+
         # Trigger canvas redraw
         self.canvas.update_plot(self.model, params, v_op, self.check_power.isChecked())
 
