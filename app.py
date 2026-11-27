@@ -3,16 +3,16 @@ import os
 import numpy as np
 
 # TODO:
-# Have Radio buttons for different conditions
 # Make it prettier
 
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QSlider, QDoubleSpinBox, 
-                             QCheckBox, QGroupBox, QFormLayout, QGridLayout)
+                             QCheckBox, QGroupBox, QFormLayout, QGridLayout,
+                             QRadioButton, QButtonGroup)
 from PyQt6.QtCore import Qt
-from model import ClassicalHillModel
+from model import ClassicalHillModel, CONDITION_PRESETS
 from visualizer import MuscleVisualizer
 
 class MuscleApp(QMainWindow):
@@ -22,6 +22,7 @@ class MuscleApp(QMainWindow):
         self.resize(1200, 650)
         
         self.model = ClassicalHillModel()
+        self._updating_preset = False
         
         self.main_widget = QWidget()
         self.setCentralWidget(self.main_widget)
@@ -32,8 +33,27 @@ class MuscleApp(QMainWindow):
         
     def setup_ui(self):
         # 1. Left Panel (Controls)
-        control_panel = QVBoxLayout()
-        group_params = QGroupBox("Hill Parameters & Controls")
+        self.control_panel = QVBoxLayout()
+
+        # 1a. Muscle Condition Presets (above Hill Parameters & Controls)
+        self.group_condition = QGroupBox("Muscle Condition")
+        condition_layout = QHBoxLayout()
+        self.condition_group = QButtonGroup(self)
+        self.condition_radios = {}
+
+        for key, preset in CONDITION_PRESETS.items():
+            radio = QRadioButton(preset["label"])
+            radio.setToolTip(preset["tooltip"])
+            self.condition_group.addButton(radio)
+            condition_layout.addWidget(radio)
+            self.condition_radios[key] = radio
+
+        self.condition_radios["average"].setChecked(True)
+        self.group_condition.setLayout(condition_layout)
+        self.control_panel.addWidget(self.group_condition)
+
+        # 1b. Hill Parameters & Controls
+        self.group_params = QGroupBox("Hill Parameters && Controls")
         form_params = QFormLayout()
         
         # Helper to create linked Slider + SpinBox (supports fractional steps)
@@ -59,7 +79,8 @@ class MuscleApp(QMainWindow):
                     slider.blockSignals(True)
                     slider.setValue(tick)
                     slider.blockSignals(False)
-                self.update_simulation()
+                if not self._updating_preset:
+                    self.update_simulation()
 
             slider.valueChanged.connect(on_slider_changed)
             spin.valueChanged.connect(on_spin_changed)
@@ -69,9 +90,14 @@ class MuscleApp(QMainWindow):
             hl.addWidget(spin)
             return spin, slider, hl
 
-        self.spin_F0, self.slider_F0, hl_F0 = create_control(10.0, 500.0, 100.0, step=1.0, decimals=1)
-        self.spin_Vmax, self.slider_Vmax, hl_Vmax = create_control(10.0, 500.0, 160.0, step=1.0, decimals=1)
-        self.spin_k, self.slider_k, hl_k = create_control(0.05, 1.00, 0.25, step=0.01, decimals=2)
+        default_preset = CONDITION_PRESETS["average"]
+        self.spin_F0, self.slider_F0, hl_F0 = create_control(10.0, 500.0, default_preset["F0"], step=1.0, decimals=1)
+        self.spin_Vmax, self.slider_Vmax, hl_Vmax = create_control(10.0, 500.0, default_preset["Vmax"], step=1.0, decimals=1)
+        self.spin_k, self.slider_k, hl_k = create_control(0.05, 1.00, default_preset["k"], step=0.01, decimals=2)
+
+        for key, radio in self.condition_radios.items():
+            radio.toggled.connect(lambda checked, k=key: self.apply_condition(k) if checked else None)
+            radio.clicked.connect(lambda _checked=False, k=key: self._reapply_if_modified(k))
 
         # Velocity operating point is bound to a percentage (0-100%) to safely scale when Vmax changes
         self.spin_v, self.slider_v, hl_v = create_control(0.0, 100.0, 20.0, step=1.0, decimals=1)
@@ -87,8 +113,8 @@ class MuscleApp(QMainWindow):
         form_params.addRow("Operating Velocity (v):", hl_v)
         form_params.addRow("", self.check_power)
         
-        group_params.setLayout(form_params)
-        control_panel.addWidget(group_params)
+        self.group_params.setLayout(form_params)
+        self.control_panel.addWidget(self.group_params)
         
         # 2. Live Readouts Group
         group_readouts = QGroupBox("Instantaneous Mechanics Readout")
@@ -110,14 +136,36 @@ class MuscleApp(QMainWindow):
         layout_readouts.addWidget(self.lbl_P, 2, 0, 1, 2)
         
         group_readouts.setLayout(layout_readouts)
-        control_panel.addWidget(group_readouts)
-        control_panel.addStretch()
+        self.control_panel.addWidget(group_readouts)
+        self.control_panel.addStretch()
         
         # 3. Right Panel (Matplotlib Canvas)
         self.canvas = MuscleVisualizer(self, width=8, height=5)
         
-        self.layout.addLayout(control_panel, 1)
+        self.layout.addLayout(self.control_panel, 1)
         self.layout.addWidget(self.canvas, 2)
+
+    def apply_condition(self, condition_key):
+        """Sets the Hill parameter controls to the default values for a muscle condition."""
+        preset = CONDITION_PRESETS[condition_key]
+        self._updating_preset = True
+        try:
+            self.spin_F0.setValue(preset["F0"])
+            self.spin_Vmax.setValue(preset["Vmax"])
+            self.spin_k.setValue(preset["k"])
+        finally:
+            self._updating_preset = False
+        self.update_simulation()
+
+    def _reapply_if_modified(self, condition_key):
+        """Resets sliders if the user re-clicks the already selected condition after manual edits."""
+        preset = CONDITION_PRESETS[condition_key]
+        if not (
+            np.isclose(self.spin_F0.value(), preset["F0"])
+            and np.isclose(self.spin_Vmax.value(), preset["Vmax"])
+            and np.isclose(self.spin_k.value(), preset["k"])
+        ):
+            self.apply_condition(condition_key)
         
     def update_simulation(self):
         """Gathers parameters, evaluates model, updates readouts and plots."""

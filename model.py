@@ -1,6 +1,31 @@
 from abc import ABC, abstractmethod
 import numpy as np
 
+CONDITION_PRESETS = {
+    "average": {
+        "label": "Average",
+        "F0": 100.0,
+        "Vmax": 160.0,
+        "k": 0.25,
+        "tooltip": "Average adult skeletal muscle (F0=100 N, Vmax=160 mm/s, k=0.25)",
+    },
+    "trained": {
+        "label": "Trained",
+        "F0": 200.0,
+        "Vmax": 240.0,
+        "k": 0.35,
+        "tooltip": "Strength/power-trained muscle with greater cross-sectional area and fast-twitch output (F0=200 N, Vmax=240 mm/s, k=0.35)",
+    },
+    "atrophied": {
+        "label": "Muscle Atrophied",
+        "F0": 50.0,
+        "Vmax": 100.0,
+        "k": 0.15,
+        "tooltip": "Atrophied muscle with reduced cross-sectional area and slower shortening velocity (F0=50 N, Vmax=100 mm/s, k=0.15)",
+    },
+}
+
+
 class MuscleModel(ABC):
     """Abstract base class for skeletal muscle contraction models."""
     
