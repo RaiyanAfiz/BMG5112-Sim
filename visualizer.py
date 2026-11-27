@@ -26,7 +26,7 @@ class MuscleVisualizer(FigureCanvasQTAgg):
         self.ax_power.clear()
         self.ax_sarc.clear()
 
-        F0, a, b = params['F0'], params['a'], params['b']
+        F0 = params['F0']
         v_max = model.get_vmax(params)
         
         # Generate F-v domain array
@@ -59,13 +59,14 @@ class MuscleVisualizer(FigureCanvasQTAgg):
             self.ax_power.set_ylim(0, max(max_P * 1.1, 1))
         else:
             self.ax_power.set_yticks([])
+            self.ax_power.set_ylabel('')
 
         self.ax_fv.set_title('Dynamics: Force-Velocity & Power')
 
         # 3. Dynamic 2D Sarcomere Model
         # Visual length shrinks as velocity approaches Vmax to signify active shortening
         contraction_ratio = v_op / v_max if v_max > 0 else 0
-        sarc_length = 3.0 - (1.5 * contraction_ratio)
+        sarc_length = 3.0 - (1.2 * contraction_ratio)
         
         self._draw_sarcomere(self.ax_sarc, sarc_length, F_op, F0)
         
@@ -100,7 +101,7 @@ class MuscleVisualizer(FigureCanvasQTAgg):
         ax.plot([half_L, half_L], [-0.5, 0.5], 'k-', lw=4)
         
         # Draw Actin (thin filaments attached to Z-discs)
-        actin_len = 1.0
+        actin_len = 0.9
         y_offsets = [-0.3, -0.1, 0.1, 0.3]
         for y in y_offsets:
             ax.plot([-half_L, -half_L + actin_len], [y, y], 'r-', lw=2)  # Left
