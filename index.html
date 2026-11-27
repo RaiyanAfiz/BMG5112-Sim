@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hill Muscle Simulator</title>
+  <meta name="description" content="Interactive Hill-type muscle contraction simulator: force-velocity curve, mechanical power, sarcomere cross-bridges and a whole-muscle view.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 26 Q8 6 28 6' fill='none' stroke='%231f4fd8' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='15' r='3.5' fill='%23d62828'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>Hill-Type Muscle Contraction Simulator</h1>
+    <p class="subtitle">Classical Hill model: (F + a)(v + b) = (F<sub>0</sub> + a)·b, with a = k·F<sub>0</sub> and b = k·V<sub>max</sub></p>
+  </header>
+
+  <main class="layout">
+    <section class="column controls" aria-label="Controls">
+      <fieldset class="card">
+        <legend>Muscle Condition</legend>
+        <div id="conditions" class="radio-row"></div>
+      </fieldset>
+
+      <fieldset class="card">
+        <legend>Hill Parameters &amp; Controls</legend>
+
+        <div class="control">
+          <label for="F0-num">Isometric Force (F<sub>0</sub>) [N]</label>
+          <div class="control-row">
+            <input type="range" id="F0-range" aria-label="Isometric force F0 in newtons">
+            <input type="number" id="F0-num" inputmode="decimal">
+          </div>
+        </div>
+
+        <div class="control">
+          <label for="Vmax-num">Max Shortening Velocity (V<sub>max</sub>) [mm/s]</label>
+          <div class="control-row">
+            <input type="range" id="Vmax-range" aria-label="Maximum shortening velocity in millimetres per second">
+            <input type="number" id="Vmax-num" inputmode="decimal">
+          </div>
+        </div>
+
+        <div class="control">
+          <label for="k-num">Curvature Constant (k = a/F<sub>0</sub>)</label>
+          <div class="control-row">
+            <input type="range" id="k-range" aria-label="Curvature constant k">
+            <input type="number" id="k-num" inputmode="decimal">
+          </div>
+        </div>
+
+        <div class="control">
+          <label for="v-num">Operating Velocity (v)</label>
+          <div class="control-row">
+            <input type="range" id="v-range" aria-label="Operating velocity as a percentage of Vmax">
+            <span class="num-with-unit">
+              <input type="number" id="v-num" inputmode="decimal">
+              <span class="unit">% of V<sub>max</sub></span>
+            </span>
+          </div>
+        </div>
+
+        <label class="check">
+          <input type="checkbox" id="power-check" checked>
+          Overlay Mechanical Power
+        </label>
+      </fieldset>
+
+      <section class="card" aria-labelledby="readout-title">
+        <h2 id="readout-title" class="card-title">Instantaneous Mechanics Readout</h2>
+        <dl class="readouts" aria-live="polite">
+          <div><dt>V<sub>max</sub></dt><dd id="ro-vmax"></dd></div>
+          <div><dt>Curvature (k)</dt><dd id="ro-k"></dd></div>
+          <div><dt>Force (F)</dt><dd id="ro-F"></dd></div>
+          <div><dt>Velocity (v)</dt><dd id="ro-v"></dd></div>
+          <div class="wide"><dt>Power (P)</dt><dd id="ro-P"></dd></div>
+        </dl>
+      </section>
+
+      <figure class="card figure">
+        <figcaption class="card-title">Whole Muscle (Elbow Flexor)</figcaption>
+        <canvas id="arm-canvas" class="canvas-arm" role="img"
+                aria-label="Arm with an elbow flexor muscle lifting a weight at the current operating point"></canvas>
+      </figure>
+    </section>
+
+    <section class="column plots" aria-label="Plots">
+      <figure class="card figure">
+        <figcaption class="card-title">Dynamics: Force-Velocity &amp; Power</figcaption>
+        <canvas id="fv-canvas" class="canvas-fv" role="img"
+                aria-label="Force-velocity curve with power overlay and the current operating point"></canvas>
+      </figure>
+
+      <figure class="card figure">
+        <figcaption class="card-title">Mechanical Schematic (Sarcomere)</figcaption>
+        <canvas id="sarc-canvas" class="canvas-sarc" role="img"
+                aria-label="Sarcomere with actin, myosin and bound or free myosin heads"></canvas>
+      </figure>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    BMG5112 · Web version of the Python/PyQt6 Hill-type muscle simulator.
+  </footer>
+
+  <script src="js/model.js"></script>
+  <script src="js/draw.js"></script>
+  <script src="js/fv-plot.js"></script>
+  <script src="js/sarcomere.js"></script>
+  <script src="js/arm.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

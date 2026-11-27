@@ -1,0 +1,6 @@
+﻿# Python build output from the main branch (not part of the web version)
+.venv/
+build/
+dist/
+__pycache__/
+*.spec
