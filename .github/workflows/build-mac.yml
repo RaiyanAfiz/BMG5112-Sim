@@ -1,0 +1,68 @@
+name: Build Mac app
+
+on:
+  workflow_dispatch:          # "Run workflow" button on the Actions tab
+  push:
+    branches: [main]
+    tags: ["v*"]              # pushing a tag like v1.0 also publishes a Release
+
+permissions:
+  contents: write             # needed to attach the zips to a Release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest       # Apple Silicon (M1 and newer)
+            arch: apple-silicon
+          - runner: macos-15-intel     # Intel Macs
+            arch: intel
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build HillMuscleSim.app
+        run: pyinstaller --noconfirm --windowed --name HillMuscleSim app.py
+
+      - name: Smoke test (app starts and stays up for 15 s)
+        run: |
+          QT_QPA_PLATFORM=offscreen ./dist/HillMuscleSim.app/Contents/MacOS/HillMuscleSim &
+          pid=$!
+          sleep 15
+          if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid"
+            echo "App started OK"
+          else
+            wait "$pid"; code=$?
+            echo "App exited early with code $code"
+            exit 1
+          fi
+
+      - name: Zip the app
+        # ditto keeps the symlinks and permissions the .app bundle needs
+        run: ditto -c -k --keepParent dist/HillMuscleSim.app HillMuscleSim-mac-${{ matrix.arch }}.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HillMuscleSim-mac-${{ matrix.arch }}
+          path: HillMuscleSim-mac-${{ matrix.arch }}.zip
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: HillMuscleSim-mac-${{ matrix.arch }}.zip
